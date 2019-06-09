@@ -1,0 +1,46 @@
+---
+title: "Notes on Statistical Learning"
+author: "Paul N. Leiby"
+date: "2/4/2017"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Notes from Hastie and Tibshirani, _Introduction to Statistical Learning_
+-------------------
+
+* See list of lectures at [In-depth introduction to machine learning in 15 hours of expert videos](https://www.r-bloggers.com/in-depth-introduction-to-machine-learning-in-15-hours-of-expert-videos/)
+
+### Lecture 3 - Regression Function - Reducible and Irreducible Error
+
+Define fitted regression function $Y = \hat f(\vec x)$ as conditional expectation of $Y$ at dependent variable value $\vec x$ 
+$$\hat f( \vec x) = E(Y | \vec X = \vec x)$$
+Since the observations $Y$ are expected to reflect the true function $f$ plus the random error term $\epsilon$, i.e.
+$$Y = f(\vec x) + \epsilon$$
+The regression function $\hat f$ will have error components associated with its inaccuracy with respect to the true function $f$, and associated with the random error term.
+$$\hat f(\vec x) - f(\vec x) = E(Y | \vec X = \vec x) - f(\vec x)$$
+The regression function $f(\vec x) = E(Y | \vec X = \vec x)$ is the function that minimizes the sum of squared errors $E[(Y − g(\vec X))^2 | \vec X = \vec x]$ over all functions $g$ at all points $X = x$.
+
+Looking at the mean and variance of this error between the fitted and true function:
+$$E_X [\hat f(\vec x) - f(\vec x)] = E_X [ E(Y | \vec X = \vec x) - f(\vec x)]$$
+$$
+\begin{aligned}
+E_X [\hat f(\vec x) - f(\vec x)] =& E_X [ E(f(\vec x) + \epsilon | \vec X = \vec x) - f(\vec x)] \\
+=& E_X [ f(\vec x) + E_{| \vec X = \vec x}(\epsilon ) - f(\vec x)]\\
+=& E_X [ E_{| \vec X = \vec x}(\epsilon )]\\
+=& 0
+\end{aligned}
+$$
+For any estimate $\hat f$ of $f$, we have
+$$\begin{aligned}
+E_X [(Y - \hat f(\vec x))^2] =& E_X [( (f(\vec x) + \epsilon) - \hat f(\vec x))^2]  \\
+=& E_X [ (f(\vec x)  - \hat f(\vec x) + \epsilon)^2]\\
+=& E_X [ (f(\vec x)  - \hat f(\vec x))^2 + 2 (f(\vec x)  - \hat f(\vec x))\epsilon + \epsilon^2]\\
+=& E_X [ (f(\vec x)  - \hat f(\vec x))^2] + E_X [2 (f(\vec x)  - \hat f(\vec x))\epsilon] + E_X [ \epsilon^2]\\
+=& E_X [ (f(\vec x)  - \hat f(\vec x))^2] + E_X [ \epsilon^2]\\
+\end{aligned}
+$$
+These two components are called, respectively, the *reducible* and the "irreducible" error of the estimator $\hat f$.

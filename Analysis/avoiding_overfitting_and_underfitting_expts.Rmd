@@ -1,0 +1,361 @@
+---
+title: "Avoiding Overfitting and Underfitting Experiments"
+author: "Paul Leiby (following RStudio/Keras tutorial)"
+date: "6/23/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Avoiding Overfitting
+
+- Original source: [RStudio Keras Documentation: Tutorial: Overfitting and Underfitting] (https://keras.rstudio.com/articles/tutorial_overfit_underfit.html)
+  - Developed by Daniel Falbel, JJ Allaire, François Chollet, RStudio, Google.
+
+- explore two common regularization techniques — weight regularization and dropout 
+— and use them to improve IMDB movie review classification results.
+
+```{r loadLibs}
+library(keras)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tibble)
+```
+
+Download the IMDB dataset
+```{r downloadIMDB}
+num_words <- 10000
+imdb <- dataset_imdb(num_words = num_words)
+
+c(train_data, train_labels) %<-% imdb$train
+c(test_data, test_labels) %<-% imdb$test
+```
+
+Rather than using an embedding as in the previous notebook, here we will multi-hot encode the sentences. This model will quickly overfit to the training set. It will be used to demonstrate when overfitting occurs, and how to fight it.
+
+Multi-hot-encoding our lists means turning them into vectors of 0s and 1s. Concretely, this would mean for instance turning the sequence [3, 5] into a 10,000-dimensional vector that would be all-zeros except for indices 3 and 5, which would be ones.
+
+```{r}
+multi_hot_sequences <- function(sequences, dimension) {
+  multi_hot <- matrix(0, nrow = length(sequences), ncol = dimension)
+  for (i in 1:length(sequences)) {
+    multi_hot[i, sequences[[i]]] <- 1
+  }
+  multi_hot
+}
+
+train_data <- multi_hot_sequences(train_data, num_words)
+test_data <- multi_hot_sequences(test_data, num_words)
+```
+
+Report dimensions of data
+
+```{r}
+dim(train_data)
+```
+
+Let’s look at one of the resulting multi-hot vectors. The word indices are sorted by frequency, so it is expected that there are more 1-values near index zero, as we can see in this plot:
+
+```{r}
+first_text <- data.frame(word = 1:10000, value = train_data[1, ])
+ggplot(first_text, aes(x = word, y = value)) +
+  geom_line() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank())
+```
+
+### Demonstrate overfitting
+The simplest way to prevent overfitting is to reduce the size of the model, i.e. the number of learnable parameters in the model (which is determined by the number of layers and the number of units per layer). 
+
+#### Create a baseline model
+
+```{r createBaselineModel}
+baseline_model <- 
+  keras_model_sequential() %>%
+  layer_dense(units = 16, activation = "relu", input_shape = 10000) %>%
+  layer_dense(units = 16, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+baseline_model %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = list("accuracy")
+)
+
+baseline_model %>% summary()
+```
+
+and train it into `baseline_history`
+
+```{r}
+baseline_history <- baseline_model %>% fit(
+  train_data,
+  train_labels,
+  epochs = 20,
+  batch_size = 512,
+  validation_data = list(test_data, test_labels),
+  verbose = 2
+)
+```
+
+#### Create a smaller model
+
+Create a model with fewer hidden units to compare against the baseline model:
+
+```{r createSmallerModel}
+smaller_model <- 
+  keras_model_sequential() %>%
+  layer_dense(units = 4, activation = "relu", input_shape = 10000) %>%
+  layer_dense(units = 4, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+smaller_model %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = list("accuracy")
+)
+
+smaller_model %>% summary()
+```
+
+Train the smaller model using the same data:
+
+```{r trainSmallerModel}
+smaller_history <- smaller_model %>% fit(
+  train_data,
+  train_labels,
+  epochs = 20,
+  batch_size = 512,
+  validation_data = list(test_data, test_labels),
+  verbose = 2
+)
+```
+
+Create a bigger model
+Next, let’s add to this benchmark a network that has much more capacity, far more than the problem would warrant:
+
+```{r createBiggerModel}
+bigger_model <- 
+  keras_model_sequential() %>%
+  layer_dense(units = 512, activation = "relu", input_shape = 10000) %>%
+  layer_dense(units = 512, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+bigger_model %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = list("accuracy")
+)
+
+bigger_model %>% summary()
+```
+
+And, again, train the model using the same data:
+
+```{r trainBiggerModel}
+bigger_history <- bigger_model %>% fit(
+  train_data,
+  train_labels,
+  epochs = 20,
+  batch_size = 512,
+  validation_data = list(test_data, test_labels),
+  verbose = 2
+)
+
+```
+
+#### Plot the training and validation loss
+
+Plot the loss curves for the 3 models. 
+
+- smaller network begins overfitting a litle later than the baseline model and its performance degrades much more slowly once it starts overfitting. 
+- larger network begins overfitting almost right away, after just one epoch, and overfits much more severely. The more capacity the network has, the quicker it will be able to model the training data (resulting in a low training loss), but the more susceptible it is to overfitting (resulting in a large difference between the training and validation loss).
+
+
+```{r plotTrainingAndValidationLoss}
+compare_cx <- data.frame(
+  baseline_train = baseline_history$metrics$loss,
+  baseline_val = baseline_history$metrics$val_loss,
+  smaller_train = smaller_history$metrics$loss,
+  smaller_val = smaller_history$metrics$val_loss,
+  bigger_train = bigger_history$metrics$loss,
+  bigger_val = bigger_history$metrics$val_loss
+) %>%
+  rownames_to_column() %>%
+  mutate(rowname = as.integer(rowname)) %>%
+  gather(key = "type", value = "value", -rowname)
+  
+ggplot(compare_cx, aes(x = rowname, y = value, color = type)) +
+  geom_line() +
+  xlab("epoch") +
+  ylab("loss") +
+  ggtitle("Training & Validation Loss vs Model Size")
+```
+
+## Strategies
+
+### Add weight regularization
+You may be familiar with Occam’s Razor principle: given two explanations for something, the explanation most likely to be correct is the “simplest” one, the one that makes the least amount of assumptions. This also applies to the models learned by neural networks: given some training data and a network architecture, there are multiple sets of weights values (multiple models) that could explain the data, and simpler models are less likely to overfit than complex ones.
+
+A “simple model” in this context is a model where the distribution of parameter values has less entropy (or a model with fewer parameters altogether, as we saw in the section above). Thus a common way to mitigate overfitting is to put constraints on the complexity of a network by forcing its weights to only take on small values, which makes the distribution of weight values more “regular”. This is called “weight regularization”, and it is done by adding to the loss function of the network a cost associated with having large weights. This cost comes in two flavors:
+
+- L1 regularization, cost added is proportional to the absolute value of the weights coefficients (i.e. “L1 norm” of the weights).
+
+- L2 regularization, cost added is proportional to the square of the value of the weights coefficients (i.e. “L2 norm” of the weights).
+  - L2 regularization is also called weight decay in the context of neural networks. 
+
+In Keras, weight regularization is added by passing weight regularizer instances to layers. Let’s add L2 weight regularization to the baseline model now.
+
+```{r testl2weightregularization}
+l2_model <- 
+  keras_model_sequential() %>%
+  layer_dense(units = 16, activation = "relu", input_shape = 10000,
+              kernel_regularizer = regularizer_l2(l = 0.001)) %>%
+  layer_dense(units = 16, activation = "relu",
+              kernel_regularizer = regularizer_l2(l = 0.001)) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+l2_model %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = list("accuracy")
+)
+
+l2_history <- l2_model %>% fit(
+  train_data,
+  train_labels,
+  epochs = 20,
+  batch_size = 512,
+  validation_data = list(test_data, test_labels),
+  verbose = 2
+)
+```
+
+l2(0.001) means that every coefficient in the weight matrix of the layer will add 0.001 * weight_coefficient_value to the total loss of the network. 
+
+Note that because this penalty is only added at training time, the loss for this network will be much higher at training than at test time.
+
+Here’s the impact of our L2 regularization penalty:
+
+```{r comparel2regularization}
+compare_cx <- data.frame(
+  baseline_train = baseline_history$metrics$loss,
+  baseline_val = baseline_history$metrics$val_loss,
+  l2_train = l2_history$metrics$loss,
+  l2_val = l2_history$metrics$val_loss
+) %>%
+  rownames_to_column() %>%
+  mutate(rowname = as.integer(rowname)) %>%
+  gather(key = "type", value = "value", -rowname)
+  
+ggplot(compare_cx, aes(x = rowname, y = value, color = type)) +
+  geom_line() +
+  xlab("epoch") +
+  ylab("loss") +
+  ggtitle("Training & Val. Loss vs with l2 regularization")
+
+```
+
+
+
+As you can see, the L2 regularized model has become much more resistant to overfitting than the baseline model, even though both models have the same number of parameters.
+
+### Add dropout
+
+- **Dropout** is one of the most effective and most commonly used regularization techniques for neural networks
+  - developed by Hinton and his students at the University of Toronto. 
+
+- Dropout, applied to a layer, consists of randomly “dropping out” (i.e. set to zero) a number of output features of the layer during training. (*without rescaling of remaining feature coeffs*)
+- The “dropout rate” is the fraction of the features that are being zeroed-out; 
+  - it is usually set between 0.2 and 0.5.
+- At test time, no units are dropped out, and instead the layer’s output values are scaled down by a factor equal to the dropout rate, so as to balance for the fact that more units are active than at training time.
+
+In `Keras` you can introduce dropout in a network via `layer_dropout()`, which gets applied to the output of the layer right before.
+
+Let’s add two dropout layers in our IMDB network to see how well they do at reducing overfitting:
+
+```{r}
+dropout_model <- 
+  keras_model_sequential() %>%
+  layer_dense(units = 16, activation = "relu", input_shape = 10000) %>%
+  layer_dropout(0.6) %>%
+  layer_dense(units = 16, activation = "relu") %>%
+  layer_dropout(0.6) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+dropout_model %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = list("accuracy")
+)
+
+dropout_history <- dropout_model %>% fit(
+  train_data,
+  train_labels,
+  epochs = 20,
+  batch_size = 512,
+  validation_data = list(test_data, test_labels),
+  verbose = 2
+)
+
+```
+
+#### Dropout perfomance
+
+```{r displayDropoutPerformance}
+compare_cx <- data.frame(
+  baseline_train = baseline_history$metrics$loss,
+  baseline_val = baseline_history$metrics$val_loss,
+  dropout_train = dropout_history$metrics$loss,
+  dropout_val = dropout_history$metrics$val_loss
+) %>%
+  rownames_to_column() %>%
+  mutate(rowname = as.integer(rowname)) %>%
+  gather(key = "type", value = "value", -rowname)
+  
+ggplot(compare_cx, aes(x = rowname, y = value, color = type)) +
+  geom_line() +
+  xlab("epoch") +
+  ylab("loss")
+  ggtitle("Training & Val. Loss vs with Dropout")
+```
+
+
+
+Adding dropout is a clear improvement over the baseline model.
+
+#### Summary Graph
+
+```{r displayl2AndDropoutPerformance}
+compare_cx <- data.frame(
+  baseline_train = baseline_history$metrics$loss,
+  baseline_val = baseline_history$metrics$val_loss,
+  l2_train = l2_history$metrics$loss,
+  l2_val = l2_history$metrics$val_loss,
+  dropout_train = dropout_history$metrics$loss,
+  dropout_val = dropout_history$metrics$val_loss
+) %>%
+  rownames_to_column() %>%
+  mutate(rowname = as.integer(rowname)) %>%
+  gather(key = "type", value = "value", -rowname)
+  
+ggplot(compare_cx, aes(x = rowname, y = value, color = type)) +
+  geom_line() +
+  xlab("epoch") +
+  ylab("loss")
+  ggtitle("Train & Val. Loss vs w/ l2-reg, Dropout")
+```
+#### Recap: most common ways to prevent overfitting in neural networks:
+
+1. Get more training data.
+2. Reduce the capacity of the network.
+3. Add weight regularization.
+4. Add dropout.
+
+And two important approaches not covered in this guide are 
+- data augmentation and 
+- batch normalization.
